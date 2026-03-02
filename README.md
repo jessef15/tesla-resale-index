@@ -29,3 +29,4 @@ curl -X POST http://localhost:3000/api/scrape \
 Stored as JSON files in `/data/` — no database needed.
 - `data/index.json` — summary of all snapshots
 - `data/snapshots/YYYY-MM-DD.json` — full listings per day
+ 
