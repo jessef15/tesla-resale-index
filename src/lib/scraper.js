@@ -1,4 +1,3 @@
-// src/lib/scraper.js
 const MODELS = ["m3", "my", "ms", "mx", "mc"];
 
 export const MODEL_LABELS = {
@@ -9,7 +8,7 @@ export const MODEL_LABELS = {
   mc: "Cybertruck",
 };
 
-async function fetchModel(modelId, zip = "30265", count = 50) {
+async function fetchPage(modelId, zip, offset, count = 50) {
   const query = {
     query: {
       model: modelId,
@@ -21,7 +20,7 @@ async function fetchModel(modelId, zip = "30265", count = 50) {
       range: 0,
       region: "GA",
     },
-    offset: 0,
+    offset,
     count,
     outsideOffset: 0,
     outsideSearch: true,
@@ -31,21 +30,30 @@ async function fetchModel(modelId, zip = "30265", count = 50) {
 
   const res = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      Accept: "application/json, text/plain, */*",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
       "Accept-Language": "en-US,en;q=0.9",
-      Referer: "https://www.tesla.com/",
+      "Referer": "https://www.tesla.com/used",
+      "Origin": "https://www.tesla.com",
+      "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"',
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin",
     },
-    cache: "no-store",
   });
 
   if (!res.ok) {
-    console.warn(`Tesla API returned ${res.status} for model ${modelId}`);
-    return [];
+    console.warn(`Tesla API returned ${res.status} for model ${modelId} offset ${offset}`);
+    return { results: [], totalMatchesFound: 0 };
   }
 
   const data = await res.json();
-  return data.results || [];
+  return {
+    results: data.results || [],
+    totalMatchesFound: data.total_matches_found || 0,
+  };
 }
 
 function normalizeListings(results, modelId) {
@@ -64,18 +72,40 @@ function normalizeListings(results, modelId) {
     }));
 }
 
+async function fetchAllPages(modelId, zip) {
+  const PAGE_SIZE = 50;
+  const MAX_LISTINGS = 500;
+  let allResults = [];
+
+  const first = await fetchPage(modelId, zip, 0, PAGE_SIZE);
+  allResults.push(...first.results);
+  const total = Math.min(first.totalMatchesFound, MAX_LISTINGS);
+  console.log(`[scraper] ${MODEL_LABELS[modelId]}: ${total} total available`);
+
+  let offset = PAGE_SIZE;
+  while (offset < total && allResults.length < MAX_LISTINGS) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const page = await fetchPage(modelId, zip, offset, PAGE_SIZE);
+    if (!page.results.length) break;
+    allResults.push(...page.results);
+    offset += PAGE_SIZE;
+    console.log(`[scraper] ${MODEL_LABELS[modelId]}: fetched ${allResults.length}/${total}`);
+  }
+
+  return allResults;
+}
+
 export async function scrapeAll(zip = "30265") {
   console.log(`[scraper] Starting scrape zip=${zip}`);
   const allListings = [];
 
   for (const modelId of MODELS) {
     try {
-      console.log(`[scraper] Fetching ${MODEL_LABELS[modelId]}...`);
-      const raw = await fetchModel(modelId, zip);
+      const raw = await fetchAllPages(modelId, zip);
       const normalized = normalizeListings(raw, modelId);
       allListings.push(...normalized);
-      console.log(`[scraper] ${MODEL_LABELS[modelId]}: ${normalized.length} listings`);
-      await new Promise((r) => setTimeout(r, 800));
+      console.log(`[scraper] ${MODEL_LABELS[modelId]}: saved ${normalized.length} listings`);
+      await new Promise((r) => setTimeout(r, 2000));
     } catch (err) {
       console.error(`[scraper] Failed for ${modelId}:`, err.message);
     }
